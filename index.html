@@ -368,282 +368,173 @@
     </div>
 
     <!-- Firebase SDK & Shared Database Sync Engine -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // 🔥 [공유용 Firebase 설정] 공유받은 외부 링크 사용자도 동일 DB로 동기화 🔥
-        const MY_FIREBASE_CONFIG = {
-            apiKey: "AIzaSyBO9MxIcql3k1FkavklUMQy_vqwCThOd1M",
-            authDomain: "shopify-dashboard-c4d46.firebaseapp.com",
-            projectId: "shopify-dashboard-c4d46",
-            storageBucket: "shopify-dashboard-c4d46.firebasestorage.app",
-            messagingSenderId: "33060733160",
-            appId: "1:33060733160:web:02c923f39779e7a5d5095d"
-        };
+    const MY_FIREBASE_CONFIG = {
+        apiKey: "AIzaSyBO9MxIcql3k1FkavklUMQy_vqwCThOd1M",
+        authDomain: "shopify-dashboard-c4d46.firebaseapp.com",
+        projectId: "shopify-dashboard-c4d46",
+        storageBucket: "shopify-dashboard-c4d46.firebasestorage.app",
+        messagingSenderId: "33060733160",
+        appId: "1:33060733160:web:02c923f39779e7a5d5095d"
+    };
 
-        const appId = 'crema-review-hub-global-v1';
-        let db = null;
-        let auth = null;
-        let isCloudActive = false;
-        let currentUser = null;
+    const appId = 'crema-review-hub-global-v1';
+    let db = null;
+    let auth = null;
+    let isCloudActive = false;
 
-        window.customGlossary = [];
-        window.editingGlossaryId = null;
+    window.customGlossary = [];
+    window.editingGlossaryId = null;
 
-        // UI 및 로컬 상태 동기화 함수
-        window.setGlossaryState = function(terms, skipSaveLocal = false) {
-            if (!Array.isArray(terms)) terms = [];
-            
-            const unique = [];
-            const seenIds = new Set();
-            const seenKrs = new Set();
-            
-            for (const term of terms) {
-                if (!term || !term.kr) continue;
-                const termId = String(term.id || term.kr);
-                if (!seenIds.has(termId) && !seenKrs.has(term.kr)) {
-                    seenIds.add(termId);
-                    seenKrs.add(term.kr);
-                    unique.push(term);
+    window.setGlossaryState = function(terms, skipSaveLocal = false) {
+        if (!Array.isArray(terms)) terms = [];
+        
+        const unique = [];
+        const seenIds = new Set();
+        const seenKrs = new Set();
+        
+        for (const term of terms) {
+            if (!term || !term.kr) continue;
+            const termId = String(term.id || term.kr);
+            if (!seenIds.has(termId) && !seenKrs.has(term.kr)) {
+                seenIds.add(termId);
+                seenKrs.add(term.kr);
+                unique.push(term);
+            }
+        }
+        window.customGlossary = unique;
+        if (!skipSaveLocal) saveToLocalStorage();
+
+        if (typeof window.updateGlossaryBadge === 'function') window.updateGlossaryBadge();
+        if (typeof window.renderGlossaryList === 'function') window.renderGlossaryList();
+    };
+
+    function loadFromLocalStorage() {
+        try {
+            const cached = localStorage.getItem('crema_user_glossary_v3');
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    window.setGlossaryState(parsed, true);
                 }
             }
-            window.customGlossary = unique;
-            if (!skipSaveLocal) {
-                saveToLocalStorage();
-            }
+        } catch (e) {}
+    }
 
-            if (typeof window.updateGlossaryBadge === 'function') {
-                window.updateGlossaryBadge();
-            }
-            if (typeof window.renderGlossaryList === 'function') {
-                window.renderGlossaryList();
-            }
-        };
+    function saveToLocalStorage() {
+        try {
+            localStorage.setItem('crema_user_glossary_v3', JSON.stringify(window.customGlossary));
+        } catch (e) {}
+    }
 
-        function loadFromLocalStorage() {
+    async function saveToCloud(updatedList) {
+        if (db) {
             try {
-                const cached = localStorage.getItem('crema_user_glossary_v3');
-                if (cached) {
-                    const parsed = JSON.parse(cached);
-                    if (Array.isArray(parsed) && parsed.length > 0) {
-                        window.setGlossaryState(parsed, true);
-                    }
-                }
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
+                await setDoc(docRef, { items: updatedList });
             } catch (e) {
-                console.error("Local storage load error:", e);
+                console.error('Cloud save failed:', e);
+                window.showToast('클라우드 저장 실패! Firebase Rules 권한을 확인해 주세요.');
             }
         }
+    }
 
-        function saveToLocalStorage() {
-            try {
-                const data = JSON.stringify(window.customGlossary);
-                localStorage.setItem('crema_user_glossary_v3', data);
-            } catch (e) {
-                console.error('LocalStorage save error:', e);
-            }
-        }
+    async function initStorage() {
+        loadFromLocalStorage();
 
-        // 클라우드 저장 전용 헬퍼 함수
-        async function saveToCloud(updatedList) {
-            if (isCloudActive && db && currentUser) {
-                try {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
-                    await setDoc(docRef, { items: updatedList });
-                } catch (e) {
-                    console.error('Cloud save failed:', e);
-                    window.showToast('클라우드 저장 실패! Firebase Rules 및 네트워크를 확인해 주세요.');
+        try {
+            const app = initializeApp(MY_FIREBASE_CONFIG);
+            db = getFirestore(app);
+            auth = getAuth(app);
+
+            // 익명 인증 완료 수신 후 구독 시작
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    isCloudActive = true;
+                    subscribeToGlossaryCloud();
                 }
-            }
-        }
-
-        async function initStorage() {
-            loadFromLocalStorage();
-
-            let firebaseConfig = MY_FIREBASE_CONFIG;
-            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                try {
-                    firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
-                } catch(e) {}
-            }
-
-            if (firebaseConfig && firebaseConfig.apiKey) {
-                try {
-                    const app = initializeApp(firebaseConfig);
-                    db = getFirestore(app);
-                    auth = getAuth(app);
-
-                    onAuthStateChanged(auth, async (user) => {
-                        if (user) {
-                            currentUser = user;
-                            isCloudActive = true;
-                            subscribeToGlossaryCloud();
-                        }
-                    });
-
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
-                } catch (err) {
-                    console.warn('Firebase init warning:', err);
-                }
-            }
-        }
-
-        function subscribeToGlossaryCloud() {
-            if (!db || !currentUser) return;
-
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
-
-            onSnapshot(docRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    const cloudItems = Array.isArray(data.items) ? data.items : [];
-                    // 클라우드 데이터를 최우선(Source of Truth)으로 설정하여 수신자 화면에 렌더링
-                    window.setGlossaryState(cloudItems);
-                }
-            }, (err) => {
-                console.error('Glossary cloud sync error:', err);
-            });
-        }
-
-        // 1. 단일 명칭 추가
-        window.addGlossaryTerm = async function() {
-            const kr = document.getElementById('gloss-kr').value.trim();
-            const en = document.getElementById('gloss-en').value.trim();
-            const ja = document.getElementById('gloss-ja').value.trim();
-            const zhCn = document.getElementById('gloss-zh-cn').value.trim();
-            const zhTw = document.getElementById('gloss-zh-tw').value.trim();
-            const exactCase = document.getElementById('gloss-exact-case').checked;
-
-            if (!kr) {
-                window.showToast('한국어 원문(KR)을 입력해 주세요.');
-                return;
-            }
-
-            if (!en && !ja && !zhCn && !zhTw) {
-                window.showToast('최소 하나 이상의 번역 언어를 입력해 주세요.');
-                return;
-            }
-
-            const docId = 'term_' + Date.now();
-            const newTerm = {
-                id: docId,
-                kr, en, ja, zhCn, zhTw,
-                exactCase: !!exactCase,
-                createdAt: Date.now()
-            };
-
-            const updatedList = [newTerm, ...window.customGlossary];
-            window.setGlossaryState(updatedList);
-            await saveToCloud(updatedList);
-
-            document.getElementById('gloss-kr').value = '';
-            document.getElementById('gloss-en').value = '';
-            document.getElementById('gloss-ja').value = '';
-            document.getElementById('gloss-zh-cn').value = '';
-            document.getElementById('gloss-zh-tw').value = '';
-            document.getElementById('gloss-exact-case').checked = false;
-
-            window.showToast(`[${kr}] 용어가 저장되어 클라우드에 공유되었습니다.`);
-        };
-
-        // 2. 대문자 유지 옵션 변경
-        window.toggleGlossaryExactCase = async function(id) {
-            const idStr = String(id);
-            const updatedList = window.customGlossary.map(item => {
-                if (String(item.id) === idStr) {
-                    return { ...item, exactCase: !item.exactCase };
-                }
-                return item;
             });
 
-            window.setGlossaryState(updatedList);
-            await saveToCloud(updatedList);
-            window.showToast('대문자 유지 설정이 변경되었습니다.');
-        };
+            // 즉시 익명 로그인 시도
+            await signInAnonymously(auth);
 
-        window.startEditGlossaryTerm = function(id) {
-            window.editingGlossaryId = String(id);
-            if (typeof window.renderGlossaryList === 'function') {
-                window.renderGlossaryList();
+        } catch (err) {
+            console.warn('Firebase init warning:', err);
+        }
+    }
+
+    function subscribeToGlossaryCloud() {
+        if (!db) return;
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
+
+        onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                const cloudItems = Array.isArray(data.items) ? data.items : [];
+                // 서버 데이터를 최우선으로 적용
+                window.setGlossaryState(cloudItems);
             }
-        };
-
-        window.cancelEditGlossaryTerm = function() {
-            window.editingGlossaryId = null;
-            if (typeof window.renderGlossaryList === 'function') {
-                window.renderGlossaryList();
-            }
-        };
-
-        // 3. 수정 사항 저장
-        window.saveEditGlossaryTerm = async function(id) {
-            const idStr = String(id);
-            const editKr = (document.getElementById(`edit-kr-${idStr}`)?.value || '').trim();
-            const editEn = (document.getElementById(`edit-en-${idStr}`)?.value || '').trim();
-            const editJa = (document.getElementById(`edit-ja-${idStr}`)?.value || '').trim();
-            const editZhCn = (document.getElementById(`edit-zh-cn-${idStr}`)?.value || '').trim();
-            const editZhTw = (document.getElementById(`edit-zh-tw-${idStr}`)?.value || '').trim();
-            const editExactCase = document.getElementById(`edit-exact-case-${idStr}`)?.checked;
-
-            if (!editKr) {
-                window.showToast('한국어 원문(KR)을 입력해 주세요.');
-                return;
-            }
-
-            if (!editEn && !editJa && !editZhCn && !editZhTw) {
-                window.showToast('최소 하나 이상의 번역 언어를 입력해 주세요.');
-                return;
-            }
-
-            const updatedList = window.customGlossary.map(item => {
-                if (String(item.id) === idStr) {
-                    return {
-                        ...item,
-                        kr: editKr,
-                        en: editEn,
-                        ja: editJa,
-                        zhCn: editZhCn,
-                        zhTw: editZhTw,
-                        exactCase: !!editExactCase
-                    };
-                }
-                return item;
-            });
-
-            window.editingGlossaryId = null;
-            window.setGlossaryState(updatedList);
-            await saveToCloud(updatedList);
-
-            window.showToast('지정 명칭이 수정되었습니다.');
-        };
-
-        // 4. 용어 삭제
-        window.deleteGlossaryTerm = async function(id) {
-            const idStr = String(id);
-            const updatedList = window.customGlossary.filter(item => String(item.id) !== idStr);
-            
-            window.setGlossaryState(updatedList);
-            await saveToCloud(updatedList);
-
-            window.showToast('지정 용어가 삭제되었습니다.');
-        };
-
-        // 5. CSV 업로드 시 Firestore 클라우드 즉시 업로드 연동 보강
-        window.saveBatchGlossaryTerms = async function(newItems) {
-            const combined = [...newItems, ...(window.customGlossary || [])];
-            window.setGlossaryState(combined);
-            await saveToCloud(combined);
-        };
-
-        window.addEventListener('DOMContentLoaded', () => {
-            initStorage();
+        }, (err) => {
+            console.error('Glossary cloud sync permission error:', err);
         });
-    </script>
+    }
+
+    window.addGlossaryTerm = async function() {
+        const kr = document.getElementById('gloss-kr').value.trim();
+        const en = document.getElementById('gloss-en').value.trim();
+        const ja = document.getElementById('gloss-ja').value.trim();
+        const zhCn = document.getElementById('gloss-zh-cn').value.trim();
+        const zhTw = document.getElementById('gloss-zh-tw').value.trim();
+        const exactCase = document.getElementById('gloss-exact-case').checked;
+
+        if (!kr || (!en && !ja && !zhCn && !zhTw)) {
+            window.showToast('한국어 원문과 최소 1개 이상의 번역 언어를 입력하세요.');
+            return;
+        }
+
+        const newTerm = {
+            id: 'term_' + Date.now(),
+            kr, en, ja, zhCn, zhTw,
+            exactCase: !!exactCase,
+            createdAt: Date.now()
+        };
+
+        const updatedList = [newTerm, ...window.customGlossary];
+        window.setGlossaryState(updatedList);
+        await saveToCloud(updatedList);
+
+        document.getElementById('gloss-kr').value = '';
+        document.getElementById('gloss-en').value = '';
+        document.getElementById('gloss-ja').value = '';
+        document.getElementById('gloss-zh-cn').value = '';
+        document.getElementById('gloss-zh-tw').value = '';
+        document.getElementById('gloss-exact-case').checked = false;
+
+        window.showToast(`[${kr}] 용어가 공유 클라우드에 저장되었습니다.`);
+    };
+
+    window.saveBatchGlossaryTerms = async function(newItems) {
+        const combined = [...newItems, ...(window.customGlossary || [])];
+        window.setGlossaryState(combined);
+        await saveToCloud(combined);
+    };
+
+    window.deleteGlossaryTerm = async function(id) {
+        const idStr = String(id);
+        const updatedList = window.customGlossary.filter(item => String(item.id) !== idStr);
+        window.setGlossaryState(updatedList);
+        await saveToCloud(updatedList);
+        window.showToast('지정 용어가 삭제되었습니다.');
+    };
+
+    window.addEventListener('DOMContentLoaded', () => {
+        initStorage();
+    });
+</script>
 
     <!-- Main Logic & AI Translation Engine -->
     <script>
