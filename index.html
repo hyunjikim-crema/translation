@@ -492,7 +492,7 @@
             }
         }
 
-        async function subscribeToGlossaryCloud() {
+    async function subscribeToGlossaryCloud() {
             if (!db || !auth.currentUser) return;
 
             const docRef = doc(db, 'shared_glossary', 'crema_global_terms');
@@ -502,9 +502,12 @@
                     const data = docSnap.data();
                     const cloudItems = Array.isArray(data.items) ? data.items : [];
                     
-                    // Merge local user-entered terms with cloud items so user terms are never lost
-                    const combined = [...window.customGlossary, ...cloudItems];
-                    window.setGlossaryState(cloudItems);
+                    // 클라우드 데이터와 기존 로컬 데이터를 하나로 합쳐서 유실 방지
+                    const localItems = window.customGlossary || [];
+                    const combined = [...cloudItems, ...localItems];
+                    
+                    // setGlossaryState가 알아서 중복(ID/KR 기준)을 제거해줍니다.
+                    window.setGlossaryState(combined);
                 } else {
                     const currentTerms = window.customGlossary || [];
                     setDoc(docRef, { items: currentTerms }).catch(err => console.error(err));
@@ -515,7 +518,7 @@
             });
         }
 
-        window.addGlossaryTerm = async function() {
+       window.addGlossaryTerm = async function() {
             const kr = document.getElementById('gloss-kr').value.trim();
             const en = document.getElementById('gloss-en').value.trim();
             const ja = document.getElementById('gloss-ja').value.trim();
@@ -542,16 +545,22 @@
             };
 
             const updatedList = [newTerm, ...window.customGlossary];
-            window.setGlossaryState(updatedList);
 
+            // 1. 서버(클라우드)에 먼저 저장을 시도합니다.
             if (isCloudStorageActive && db && auth.currentUser) {
                 try {
                     const docRef = doc(db, 'shared_glossary', 'crema_global_terms');
-                    await setDoc(docRef, { items: updatedList });
+                    await setDoc(docRef, { items: updatedList }, { merge: true });
+                    console.log("Firebase 저장 성공!");
                 } catch (e) {
-                    console.error('Error saving to cloud:', e);
+                    console.error('Firebase 클라우드 저장 실패:', e);
+                    window.showToast('클라우드 저장 실패: 보안 규칙이나 네트워크를 확인하세요.');
+                    return;
                 }
             }
+
+            // 2. 서버 저장이 성공하거나 로컬 모드일 때 상태 업데이트
+            window.setGlossaryState(updatedList);
 
             document.getElementById('gloss-kr').value = '';
             document.getElementById('gloss-en').value = '';
