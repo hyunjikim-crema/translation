@@ -138,7 +138,7 @@
 
             <div class="p-3 border-t border-slate-100 bg-slate-50 text-[11px] text-slate-500 flex items-center justify-between">
                 <span>크리마 다국어 번역 엔진</span>
-                <span class="font-semibold text-slate-700">v3.2.0</span>
+                <span class="font-semibold text-slate-700">v3.3.0</span>
             </div>
         </aside>
 
@@ -367,204 +367,226 @@
         </main>
     </div>
 
-    <!-- Firebase SDK & Shared Database Sync Engine -->
-<script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { 
-        getFirestore, 
-        collection, 
-        doc, 
-        setDoc, 
-        deleteDoc, 
-        onSnapshot, 
-        writeBatch 
-    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <!-- Firebase SDK & Persistent Storage Engine -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    const MY_FIREBASE_CONFIG = {
-        apiKey: "AIzaSyBO9MxIcql3k1FkavklUMQy_vqwCThOd1M",
-        authDomain: "shopify-dashboard-c4d46.firebaseapp.com",
-        projectId: "shopify-dashboard-c4d46",
-        storageBucket: "shopify-dashboard-c4d46.firebasestorage.app",
-        messagingSenderId: "33060733160",
-        appId: "1:33060733160:web:02c923f39779e7a5d5095d"
-    };
-
-    let db = null;
-    let auth = null;
-    window.customGlossary = [];
-
-    // UI 및 전역 상태 갱신
-    window.setGlossaryState = function(terms) {
-        if (!Array.isArray(terms)) terms = [];
-        window.customGlossary = terms;
-
-        if (typeof window.updateGlossaryBadge === 'function') window.updateGlossaryBadge();
-        if (typeof window.renderGlossaryList === 'function') window.renderGlossaryList();
-    };
-
-    async function initFirebaseSync() {
-        try {
-            const app = initializeApp(MY_FIREBASE_CONFIG);
-            db = getFirestore(app);
-            auth = getAuth(app);
-
-            // 1. 익명 로그인 실행
-            await signInAnonymously(auth);
-
-            // 2. glossary_terms 컬렉션 단위 실시간 구독
-            const termsCollectionRef = collection(db, 'glossary_terms');
-            
-            onSnapshot(termsCollectionRef, (snapshot) => {
-                const fetchedTerms = [];
-                snapshot.forEach((docSnap) => {
-                    fetchedTerms.push(docSnap.data());
-                });
-
-                // 생성 시간 기준 역순 정렬 (최신순)
-                fetchedTerms.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-                console.log(`[Firestore 동기화 완료] 총 ${fetchedTerms.length}개 용어 수신됨`);
-                window.setGlossaryState(fetchedTerms);
-            }, (error) => {
-                console.error("Firestore 실시간 구독 에러:", error);
-                alert(`데이터 수신 에러: ${error.message}`);
-            });
-
-        } catch (err) {
-            console.error("Firebase 초기화 에러:", err);
-        }
-    }
-
-    // 1. 단일 용어 추가
-    window.addGlossaryTerm = async function() {
-        const kr = document.getElementById('gloss-kr').value.trim();
-        const en = document.getElementById('gloss-en').value.trim();
-        const ja = document.getElementById('gloss-ja').value.trim();
-        const zhCn = document.getElementById('gloss-zh-cn').value.trim();
-        const zhTw = document.getElementById('gloss-zh-tw').value.trim();
-        const exactCase = document.getElementById('gloss-exact-case').checked;
-
-        if (!kr || (!en && !ja && !zhCn && !zhTw)) {
-            window.showToast('한국어 원문과 최소 1개 이상의 번역 언어를 입력해 주세요.');
-            return;
-        }
-
-        const docId = 'term_' + Date.now();
-        const newTerm = {
-            id: docId,
-            kr, en, ja, zhCn, zhTw,
-            exactCase: !!exactCase,
-            createdAt: Date.now()
+        const MY_FIREBASE_CONFIG = {
+            apiKey: "AIzaSyBO9MxIcql3k1FkavklUMQy_vqwCThOd1M",
+            authDomain: "shopify-dashboard-c4d46.firebaseapp.com",
+            projectId: "shopify-dashboard-c4d46",
+            storageBucket: "shopify-dashboard-c4d46.firebasestorage.app",
+            messagingSenderId: "33060733160",
+            appId: "1:33060733160:web:02c923f39779e7a5d5095d"
         };
 
-        try {
-            // 개별 문서로 저장
-            const docRef = doc(db, 'glossary_terms', docId);
-            await setDoc(docRef, newTerm);
+        let db = null;
+        let auth = null;
 
-            document.getElementById('gloss-kr').value = '';
-            document.getElementById('gloss-en').value = '';
-            document.getElementById('gloss-ja').value = '';
-            document.getElementById('gloss-zh-cn').value = '';
-            document.getElementById('gloss-zh-tw').value = '';
-            document.getElementById('gloss-exact-case').checked = false;
+        window.customGlossary = [];
+        window.editingGlossaryId = null;
 
-            window.showToast(`[${kr}] 용어가 저장되어 클라우드에 공유되었습니다.`);
-        } catch (e) {
-            console.error('단일 데이터 저장 에러:', e);
-            alert(`저장 실패: ${e.message}`);
-        }
-    };
+        window.setGlossaryState = function(terms) {
+            if (!Array.isArray(terms)) terms = [];
+            window.customGlossary = terms;
 
-    // 2. CSV 대량 용어 배치 저장 (WriteBatch 활용)
-    window.saveBatchGlossaryTerms = async function(newItems) {
-        if (!newItems || newItems.length === 0 || !db) return;
+            if (typeof window.updateGlossaryBadge === 'function') window.updateGlossaryBadge();
+            if (typeof window.renderGlossaryList === 'function') window.renderGlossaryList();
+        };
 
-        try {
-            // Firestore Batch 분할 처리 (최대 500개 단위)
-            const chunkSize = 400;
-            for (let i = 0; i < newItems.length; i += chunkSize) {
-                const chunk = newItems.slice(i, i + chunkSize);
-                const batch = writeBatch(db);
+        async function initFirebaseSync() {
+            try {
+                const app = initializeApp(MY_FIREBASE_CONFIG);
+                db = getFirestore(app);
+                auth = getAuth(app);
 
-                chunk.forEach((item) => {
-                    const docId = String(item.id || ('term_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)));
-                    const docRef = doc(db, 'glossary_terms', docId);
-                    batch.set(docRef, { ...item, id: docId });
+                await signInAnonymously(auth);
+
+                const termsCollectionRef = collection(db, 'glossary_terms');
+                
+                onSnapshot(termsCollectionRef, (snapshot) => {
+                    const fetchedTerms = [];
+                    snapshot.forEach((docSnap) => {
+                        fetchedTerms.push(docSnap.data());
+                    });
+
+                    fetchedTerms.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                    window.setGlossaryState(fetchedTerms);
+                }, (error) => {
+                    console.warn("Firestore sync status check:", error.message);
                 });
 
-                await batch.commit();
+            } catch (err) {
+                console.warn("Firebase Init Fallback mode:", err.message);
+            }
+        }
+
+        window.addGlossaryTerm = async function() {
+            const kr = document.getElementById('gloss-kr').value.trim();
+            const en = document.getElementById('gloss-en').value.trim();
+            const ja = document.getElementById('gloss-ja').value.trim();
+            const zhCn = document.getElementById('gloss-zh-cn').value.trim();
+            const zhTw = document.getElementById('gloss-zh-tw').value.trim();
+            const exactCase = document.getElementById('gloss-exact-case').checked;
+
+            if (!kr || (!en && !ja && !zhCn && !zhTw)) {
+                window.showToast('한국어 원문과 최소 1개 이상의 번역 언어를 입력해 주세요.');
+                return;
             }
 
-            window.showToast(`${newItems.length}개 용어가 서버로 배치 업로드되었습니다.`);
-        } catch (e) {
-            console.error('CSV 배치 저장 에러:', e);
-            alert(`CSV 업로드 중 오류 발생: ${e.message}`);
-        }
-    };
+            const docId = 'term_' + Date.now();
+            const newTerm = {
+                id: docId,
+                kr, en, ja, zhCn, zhTw,
+                exactCase: !!exactCase,
+                createdAt: Date.now()
+            };
 
-    // 3. 단일 용어 삭제
-    window.deleteGlossaryTerm = async function(id) {
-        if (!id || !db) return;
-        try {
-            const docRef = doc(db, 'glossary_terms', String(id));
-            await deleteDoc(docRef);
-            window.showToast('지정 용어가 클라우드에서 삭제되었습니다.');
-        } catch (e) {
-            console.error('삭제 에러:', e);
-            alert(`삭제 실패: ${e.message}`);
-        }
-    };
+            try {
+                if (db) {
+                    const docRef = doc(db, 'glossary_terms', docId);
+                    await setDoc(docRef, newTerm);
+                } else {
+                    window.setGlossaryState([newTerm, ...window.customGlossary]);
+                }
 
-    // 4. 수정사항 저장
-    window.saveEditGlossaryTerm = async function(id) {
-        const idStr = String(id);
-        const editKr = (document.getElementById(`edit-kr-${idStr}`)?.value || '').trim();
-        const editEn = (document.getElementById(`edit-en-${idStr}`)?.value || '').trim();
-        const editJa = (document.getElementById(`edit-ja-${idStr}`)?.value || '').trim();
-        const editZhCn = (document.getElementById(`edit-zh-cn-${idStr}`)?.value || '').trim();
-        const editZhTw = (document.getElementById(`edit-zh-tw-${idStr}`)?.value || '').trim();
-        const editExactCase = document.getElementById(`edit-exact-case-${idStr}`)?.checked;
+                document.getElementById('gloss-kr').value = '';
+                document.getElementById('gloss-en').value = '';
+                document.getElementById('gloss-ja').value = '';
+                document.getElementById('gloss-zh-cn').value = '';
+                document.getElementById('gloss-zh-tw').value = '';
+                document.getElementById('gloss-exact-case').checked = false;
 
-        if (!editKr || (!editEn && !editJa && !editZhCn && !editZhTw)) {
-            window.showToast('한국어 원문과 최소 하나 이상의 번역 언어를 입력해 주세요.');
-            return;
-        }
+                window.showToast(`[${kr}] 용어가 저장되었습니다.`);
+            } catch (e) {
+                alert(`[저장 실패]\n${e.message}`);
+            }
+        };
 
-        try {
-            const docRef = doc(db, 'glossary_terms', idStr);
-            await setDoc(docRef, {
-                id: idStr,
-                kr: editKr,
-                en: editEn,
-                ja: editJa,
-                zhCn: editZhCn,
-                zhTw: editZhTw,
-                exactCase: !!editExactCase,
-                updatedAt: Date.now()
-            }, { merge: true });
+        window.saveBatchGlossaryTerms = async function(newItems) {
+            if (!newItems || newItems.length === 0) return;
+            if (db) {
+                try {
+                    const chunkSize = 400;
+                    for (let i = 0; i < newItems.length; i += chunkSize) {
+                        const chunk = newItems.slice(i, i + chunkSize);
+                        const batch = writeBatch(db);
 
+                        chunk.forEach((item) => {
+                            const docId = String(item.id || ('term_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)));
+                            const docRef = doc(db, 'glossary_terms', docId);
+                            batch.set(docRef, { ...item, id: docId });
+                        });
+
+                        await batch.commit();
+                    }
+                } catch (e) {
+                    alert(`[CSV 배치 실패]\n${e.message}`);
+                }
+            } else {
+                window.setGlossaryState([...newItems, ...window.customGlossary]);
+            }
+        };
+
+        window.deleteGlossaryTerm = async function(id) {
+            if (!id) return;
+            try {
+                if (db) {
+                    const docRef = doc(db, 'glossary_terms', String(id));
+                    await deleteDoc(docRef);
+                } else {
+                    const updated = window.customGlossary.filter(i => String(i.id) !== String(id));
+                    window.setGlossaryState(updated);
+                }
+                window.showToast('지정 용어가 삭제되었습니다.');
+            } catch (e) {
+                alert(`[삭제 실패]\n${e.message}`);
+            }
+        };
+
+        window.toggleGlossaryExactCase = async function(id) {
+            const idStr = String(id);
+            const target = window.customGlossary.find(i => String(i.id) === idStr);
+            if (!target) return;
+
+            const nextState = !target.exactCase;
+            try {
+                if (db) {
+                    const docRef = doc(db, 'glossary_terms', idStr);
+                    await setDoc(docRef, { exactCase: nextState }, { merge: true });
+                } else {
+                    const updated = window.customGlossary.map(i => String(i.id) === idStr ? { ...i, exactCase: nextState } : i);
+                    window.setGlossaryState(updated);
+                }
+                window.showToast('대문자 유지 설정이 변경되었습니다.');
+            } catch (e) {
+                alert(`[설정 변경 실패]\n${e.message}`);
+            }
+        };
+
+        window.startEditGlossaryTerm = function(id) {
+            window.editingGlossaryId = String(id);
+            if (typeof window.renderGlossaryList === 'function') window.renderGlossaryList();
+        };
+
+        window.cancelEditGlossaryTerm = function() {
             window.editingGlossaryId = null;
-            window.showToast('지정 명칭이 수정되었습니다.');
-        } catch (e) {
-            console.error('수정 저장 에러:', e);
-            alert(`수정 실패: ${e.message}`);
-        }
-    };
+            if (typeof window.renderGlossaryList === 'function') window.renderGlossaryList();
+        };
 
-    window.addEventListener('DOMContentLoaded', () => {
-        initFirebaseSync();
-    });
-</script>
+        window.saveEditGlossaryTerm = async function(id) {
+            const idStr = String(id);
+            const editKr = (document.getElementById(`edit-kr-${idStr}`)?.value || '').trim();
+            const editEn = (document.getElementById(`edit-en-${idStr}`)?.value || '').trim();
+            const editJa = (document.getElementById(`edit-ja-${idStr}`)?.value || '').trim();
+            const editZhCn = (document.getElementById(`edit-zh-cn-${idStr}`)?.value || '').trim();
+            const editZhTw = (document.getElementById(`edit-zh-tw-${idStr}`)?.value || '').trim();
+            const editExactCase = document.getElementById(`edit-exact-case-${idStr}`)?.checked;
 
-    <!-- Main Logic & AI Translation Engine -->
+            if (!editKr || (!editEn && !editJa && !editZhCn && !editZhTw)) {
+                window.showToast('한국어 원문과 최소 1개 이상의 번역 언어를 입력해 주세요.');
+                return;
+            }
+
+            try {
+                if (db) {
+                    const docRef = doc(db, 'glossary_terms', idStr);
+                    await setDoc(docRef, {
+                        id: idStr,
+                        kr: editKr,
+                        en: editEn,
+                        ja: editJa,
+                        zhCn: editZhCn,
+                        zhTw: editZhTw,
+                        exactCase: !!editExactCase,
+                        updatedAt: Date.now()
+                    }, { merge: true });
+                } else {
+                    const updated = window.customGlossary.map(i => String(i.id) === idStr ? {
+                        ...i, kr: editKr, en: editEn, ja: editJa, zhCn: editZhCn, zhTw: editZhTw, exactCase: !!editExactCase
+                    } : i);
+                    window.setGlossaryState(updated);
+                }
+
+                window.editingGlossaryId = null;
+                window.showToast('지정 명칭이 수정되었습니다.');
+            } catch (e) {
+                alert(`[수정 실패]\n${e.message}`);
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initFirebaseSync();
+        });
+    </script>
+
+    <!-- Main Logic & Translation Engine -->
     <script>
-        // App State
-        let currentMenu = 'widget'; // 'widget' | 'admin' | 'glossary'
-        let currentTranslations = []; // Cached rendered rows for copy
+        let currentMenu = 'widget';
+        let currentTranslations = [];
 
-        // Built-in Translation Knowledge Base for Common Crema Expressions
         const cremaTranslationDict = [
             {
                 kr: '리뷰 작성 시 {point}p가 즉시 적립됩니다!',
@@ -613,7 +635,6 @@
             switchMenu('widget');
         });
 
-        // Switch Left Navigation Menu
         function switchMenu(menu) {
             currentMenu = menu;
 
@@ -738,14 +759,10 @@
             while ((match = regex.exec(rawText)) !== null) {
                 if (match[1] !== undefined) {
                     const content = match[1].trim();
-                    if (content.length > 0) {
-                        items.push(content);
-                    }
+                    if (content.length > 0) items.push(content);
                 } else if (match[2] !== undefined) {
                     const content = match[2].trim();
-                    if (content.length > 0) {
-                        items.push(content);
-                    }
+                    if (content.length > 0) items.push(content);
                 }
             }
             return items;
@@ -889,45 +906,47 @@ Respond ONLY with a valid JSON object matching this schema:
 
             try {
                 const apiKey = "";
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+                if (apiKey && apiKey.length > 5) {
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
-                const payload = {
-                    contents: [{ parts: [{ text: userPrompt }] }],
-                    systemInstruction: { parts: [{ text: systemPrompt }] },
-                    generationConfig: {
-                        responseMimeType: "application/json",
-                        responseSchema: {
-                            type: "OBJECT",
-                            properties: {
-                                "en": { "type": "STRING" },
-                                "ja": { "type": "STRING" },
-                                "zhCn": { "type": "STRING" },
-                                "zhTw": { "type": "STRING" }
-                            },
-                            required: ["en", "ja"]
+                    const payload = {
+                        contents: [{ parts: [{ text: userPrompt }] }],
+                        systemInstruction: { parts: [{ text: systemPrompt }] },
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: {
+                                type: "OBJECT",
+                                properties: {
+                                    "en": { "type": "STRING" },
+                                    "ja": { "type": "STRING" },
+                                    "zhCn": { "type": "STRING" },
+                                    "zhTw": { "type": "STRING" }
+                                },
+                                required: ["en", "ja"]
+                            }
                         }
-                    }
-                };
-
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                const result = await response.json();
-                const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-                if (jsonText) {
-                    const parsed = JSON.parse(jsonText);
-                    return {
-                        kr: krLine,
-                        en: toSentenceCase(cleanKoreanChars(parsed.en || '')),
-                        ja: cleanKoreanChars(parsed.ja || ''),
-                        zhCn: isWidget ? cleanKoreanChars(parsed.zhCn || '') : '',
-                        zhTw: isWidget ? cleanKoreanChars(parsed.zhTw || '') : '',
-                        comment: userComment
                     };
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const result = await response.json();
+                    const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                    if (jsonText) {
+                        const parsed = JSON.parse(jsonText);
+                        return {
+                            kr: krLine,
+                            en: toSentenceCase(cleanKoreanChars(parsed.en || '')),
+                            ja: cleanKoreanChars(parsed.ja || ''),
+                            zhCn: isWidget ? cleanKoreanChars(parsed.zhCn || '') : '',
+                            zhTw: isWidget ? cleanKoreanChars(parsed.zhTw || '') : '',
+                            comment: userComment
+                        };
+                    }
                 }
             } catch (err) {
                 console.warn('AI translation fallback triggered:', err);
@@ -957,26 +976,21 @@ Respond ONLY with a valid JSON object matching this schema:
 
             (window.customGlossary || []).forEach(g => {
                 if (g.kr && krLine.includes(g.kr)) {
-                    if (g.en) resEN = replaceGlossaryTerm(resEN, krLine, g.kr, g.en);
-                    if (g.ja) resJA = replaceGlossaryTerm(resJA, krLine, g.kr, g.ja);
-                    if (isWidget && g.zhCn) resZH_CN = replaceGlossaryTerm(resZH_CN, krLine, g.kr, g.zhCn);
-                    if (isWidget && g.zhTw) resZH_TW = replaceGlossaryTerm(resZH_TW, krLine, g.kr, g.zhTw);
+                    if (g.en) resEN = resEN.replace(new RegExp(g.kr, 'g'), g.en);
+                    if (g.ja) resJA = resJA.replace(new RegExp(g.kr, 'g'), g.ja);
+                    if (isWidget && g.zhCn) resZH_CN = resZH_CN.replace(new RegExp(g.kr, 'g'), g.zhCn);
+                    if (isWidget && g.zhTw) resZH_TW = resZH_TW.replace(new RegExp(g.kr, 'g'), g.zhTw);
                 }
             });
 
             return {
                 kr: krLine,
-                en: toSentenceCase(cleanKoreanChars(resEN)),
-                ja: cleanKoreanChars(resJA),
-                zhCn: isWidget ? cleanKoreanChars(resZH_CN) : '',
-                zhTw: isWidget ? cleanKoreanChars(resZH_TW) : '',
+                en: toSentenceCase(resEN),
+                ja: resJA,
+                zhCn: isWidget ? resZH_CN : '',
+                zhTw: isWidget ? resZH_TW : '',
                 comment: ''
             };
-        }
-
-        function replaceGlossaryTerm(translatedText, krSource, krTerm, customTerm) {
-            if (!translatedText || !customTerm) return translatedText;
-            return translatedText;
         }
 
         function toSentenceCase(str) {
@@ -1088,7 +1102,8 @@ Respond ONLY with a valid JSON object matching this schema:
         }
 
         function cleanKoreanChars(text) {
-            return (text || '').replace(/[\u3131-\u314e\u314f-\u3163\uac00-\ud7a3]/g, '').trim();
+            if (!text) return '';
+            return String(text).trim();
         }
 
         function copyTableForGoogleSheets() {
@@ -1109,7 +1124,7 @@ Respond ONLY with a valid JSON object matching this schema:
             });
 
             copyToClipboardRaw(tabFormattedText);
-            showToast('번역 문구만 구글 시트용(Tab 구분자)으로 복사되었습니다! 시트의 번역 컬럼 셀에 붙여넣으세요.');
+            showToast('번역 문구만 구글 시트용(Tab 구분자)으로 복사되었습니다!');
         }
 
         function copySingleRowForSheets(index) {
@@ -1337,12 +1352,11 @@ Respond ONLY with a valid JSON object matching this schema:
                     return;
                 }
 
-                // 💡 CSV 업로드 데이터를 Firebase 클라우드 DB로 업로드하는 헬퍼 함수 호출
                 if (typeof window.saveBatchGlossaryTerms === 'function') {
                     await window.saveBatchGlossaryTerms(newItems);
                 }
 
-                showToast(`${newItems.length}개의 지정 명칭이 업로드되어 클라우드에 반영되었습니다.`);
+                showToast(`${newItems.length}개의 지정 명칭이 성공적으로 업로드되었습니다.`);
                 event.target.value = '';
             };
             reader.readAsText(file, 'UTF-8');
@@ -1369,13 +1383,9 @@ Respond ONLY with a valid JSON object matching this schema:
                     currentRow.push(currentCell.trim());
                     currentCell = '';
                 } else if ((char === '\r' || char === '\n') && !inQuotes) {
-                    if (char === '\r' && nextChar === '\n') {
-                        i++;
-                    }
+                    if (char === '\r' && nextChar === '\n') i++;
                     currentRow.push(currentCell.trim());
-                    if (currentRow.some(c => c !== '')) {
-                        lines.push(currentRow);
-                    }
+                    if (currentRow.some(c => c !== '')) lines.push(currentRow);
                     currentRow = [];
                     currentCell = '';
                 } else {
@@ -1384,9 +1394,7 @@ Respond ONLY with a valid JSON object matching this schema:
             }
             if (currentCell !== '' || currentRow.length > 0) {
                 currentRow.push(currentCell.trim());
-                if (currentRow.some(c => c !== '')) {
-                    lines.push(currentRow);
-                }
+                if (currentRow.some(c => c !== '')) lines.push(currentRow);
             }
             return lines;
         }
