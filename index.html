@@ -484,7 +484,7 @@
         async function subscribeToGlossaryCloud() {
             if (!db || !auth.currentUser) return;
 
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
+            const docRef = doc(db, 'shared_glossary', 'crema_global_terms');
 
             onSnapshot(docRef, (docSnap) => {
                 if (docSnap.exists()) {
@@ -493,7 +493,7 @@
                     
                     // Merge local user-entered terms with cloud items so user terms are never lost
                     const combined = [...window.customGlossary, ...cloudItems];
-                    window.setGlossaryState(combined);
+                    window.setGlossaryState(cloudItems);
                 } else {
                     const currentTerms = window.customGlossary || [];
                     setDoc(docRef, { items: currentTerms }).catch(err => console.error(err));
@@ -535,7 +535,7 @@
 
             if (isCloudStorageActive && db && auth.currentUser) {
                 try {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
+                    const docRef = doc(db, 'shared_glossary', 'crema_global_terms');
                     await setDoc(docRef, { items: updatedList });
                 } catch (e) {
                     console.error('Error saving to cloud:', e);
@@ -565,7 +565,7 @@
 
             if (isCloudStorageActive && db && auth.currentUser) {
                 try {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
+                    const docRef = doc(db, 'shared_glossary', 'crema_global_terms');
                     await setDoc(docRef, { items: updatedList });
                 } catch (e) {
                     console.error('Error updating exactCase in cloud:', e);
@@ -628,7 +628,7 @@
 
             if (isCloudStorageActive && db && auth.currentUser) {
                 try {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
+                    const docRef = doc(db, 'shared_glossary', 'crema_global_terms');
                     await setDoc(docRef, { items: updatedList });
                 } catch (e) {
                     console.error('Error updating edited term in cloud:', e);
@@ -646,7 +646,7 @@
 
             if (isCloudStorageActive && db && auth.currentUser) {
                 try {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
+                    const docRef = doc(db, 'shared_glossary', 'crema_global_terms');
                     await setDoc(docRef, { items: updatedList });
                 } catch (e) {
                     console.error('Error deleting from cloud:', e);
