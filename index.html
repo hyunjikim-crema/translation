@@ -370,7 +370,7 @@
     <!-- Firebase SDK & Shared Database Sync Engine -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const MY_FIREBASE_CONFIG = {
@@ -382,107 +382,71 @@
         appId: "1:33060733160:web:02c923f39779e7a5d5095d"
     };
 
-    const appId = 'crema-review-hub-global-v1';
     let db = null;
     let auth = null;
-    let isCloudActive = false;
+    let isCloudLoaded = false; // 클라우드 초기 로딩 완료 여부
 
     window.customGlossary = [];
-    window.editingGlossaryId = null;
 
-    window.setGlossaryState = function(terms, skipSaveLocal = false) {
+    // UI 및 상태 반영
+    window.setGlossaryState = function(terms) {
         if (!Array.isArray(terms)) terms = [];
-        
-        const unique = [];
-        const seenIds = new Set();
-        const seenKrs = new Set();
-        
-        for (const term of terms) {
-            if (!term || !term.kr) continue;
-            const termId = String(term.id || term.kr);
-            if (!seenIds.has(termId) && !seenKrs.has(term.kr)) {
-                seenIds.add(termId);
-                seenKrs.add(term.kr);
-                unique.push(term);
-            }
-        }
-        window.customGlossary = unique;
-        if (!skipSaveLocal) saveToLocalStorage();
+        window.customGlossary = terms;
 
         if (typeof window.updateGlossaryBadge === 'function') window.updateGlossaryBadge();
         if (typeof window.renderGlossaryList === 'function') window.renderGlossaryList();
     };
 
-    function loadFromLocalStorage() {
+    // 클라우드로 데이터 전송 (저장/수정/삭제 공통)
+    async function syncToCloud(updatedList) {
+        if (!db) {
+            alert("DB 연결이 안 되어 있습니다. 콘솔 에러를 확인하세요.");
+            return;
+        }
         try {
-            const cached = localStorage.getItem('crema_user_glossary_v3');
-            if (cached) {
-                const parsed = JSON.parse(cached);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    window.setGlossaryState(parsed, true);
-                }
-            }
-        } catch (e) {}
-    }
-
-    function saveToLocalStorage() {
-        try {
-            localStorage.setItem('crema_user_glossary_v3', JSON.stringify(window.customGlossary));
-        } catch (e) {}
-    }
-
-    async function saveToCloud(updatedList) {
-        if (db) {
-            try {
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
-                await setDoc(docRef, { items: updatedList });
-            } catch (e) {
-                console.error('Cloud save failed:', e);
-                window.showToast('클라우드 저장 실패! Firebase Rules 권한을 확인해 주세요.');
-            }
+            // 경로 단순화: 'glossary' 컬렉션의 'shared_data' 문서
+            const docRef = doc(db, 'glossary', 'shared_data');
+            await setDoc(docRef, { items: updatedList, updatedAt: Date.now() });
+        } catch (e) {
+            console.error('Firestore 쓰기 에러:', e);
+            alert(`클라우드 저장 실패! 에러: ${e.message}`);
         }
     }
 
-    async function initStorage() {
-        loadFromLocalStorage();
-
+    async function initFirebaseSync() {
         try {
             const app = initializeApp(MY_FIREBASE_CONFIG);
             db = getFirestore(app);
             auth = getAuth(app);
 
-            // 익명 인증 완료 수신 후 구독 시작
-            onAuthStateChanged(auth, (user) => {
-                if (user) {
-                    isCloudActive = true;
-                    subscribeToGlossaryCloud();
+            // 1. 익명 로그인 실행 (Firebase Console에서 Anonymous 활성화 필수)
+            await signInAnonymously(auth);
+            console.log("Firebase Auth 로그인 성공");
+
+            // 2. 실시간 구독 설정
+            const docRef = doc(db, 'glossary', 'shared_data');
+            onSnapshot(docRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const data = snapshot.data();
+                    const cloudTerms = data.items || [];
+                    console.log("클라우드 데이터 수신 성공:", cloudTerms.length, "개");
+                    window.setGlossaryState(cloudTerms);
+                } else {
+                    console.log("클라우드 문서가 존재하지 않습니다. 첫 데이터 등록이 필요합니다.");
                 }
+                isCloudLoaded = true;
+            }, (error) => {
+                console.error("Firestore 읽기 구독 에러:", error);
+                alert(`데이터 읽기 실패: ${error.message}\nFirebase Rules 또는 Auth 설정을 확인하세요.`);
             });
 
-            // 즉시 익명 로그인 시도
-            await signInAnonymously(auth);
-
         } catch (err) {
-            console.warn('Firebase init warning:', err);
+            console.error("Firebase 초기화 에러:", err);
+            alert(`Firebase 초기화 실패: ${err.message}`);
         }
     }
 
-    function subscribeToGlossaryCloud() {
-        if (!db) return;
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'glossary_data', 'terms');
-
-        onSnapshot(docRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                const cloudItems = Array.isArray(data.items) ? data.items : [];
-                // 서버 데이터를 최우선으로 적용
-                window.setGlossaryState(cloudItems);
-            }
-        }, (err) => {
-            console.error('Glossary cloud sync permission error:', err);
-        });
-    }
-
+    // 용어 등록 함수
     window.addGlossaryTerm = async function() {
         const kr = document.getElementById('gloss-kr').value.trim();
         const en = document.getElementById('gloss-en').value.trim();
@@ -504,8 +468,7 @@
         };
 
         const updatedList = [newTerm, ...window.customGlossary];
-        window.setGlossaryState(updatedList);
-        await saveToCloud(updatedList);
+        await syncToCloud(updatedList);
 
         document.getElementById('gloss-kr').value = '';
         document.getElementById('gloss-en').value = '';
@@ -514,25 +477,25 @@
         document.getElementById('gloss-zh-tw').value = '';
         document.getElementById('gloss-exact-case').checked = false;
 
-        window.showToast(`[${kr}] 용어가 공유 클라우드에 저장되었습니다.`);
+        window.showToast(`[${kr}] 용어가 동기화되었습니다.`);
     };
 
+    // CSV 일괄 저장
     window.saveBatchGlossaryTerms = async function(newItems) {
-        const combined = [...newItems, ...(window.customGlossary || [])];
-        window.setGlossaryState(combined);
-        await saveToCloud(combined);
+        const combined = [...newItems, ...window.customGlossary];
+        await syncToCloud(combined);
     };
 
+    // 삭제
     window.deleteGlossaryTerm = async function(id) {
         const idStr = String(id);
         const updatedList = window.customGlossary.filter(item => String(item.id) !== idStr);
-        window.setGlossaryState(updatedList);
-        await saveToCloud(updatedList);
-        window.showToast('지정 용어가 삭제되었습니다.');
+        await syncToCloud(updatedList);
+        window.showToast('삭제되었습니다.');
     };
 
     window.addEventListener('DOMContentLoaded', () => {
-        initStorage();
+        initFirebaseSync();
     });
 </script>
 
