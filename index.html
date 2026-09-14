@@ -368,10 +368,18 @@
     </div>
 
     <!-- Firebase SDK & Shared Database Sync Engine -->
-  <script type="module">
+<script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { 
+        getFirestore, 
+        collection, 
+        doc, 
+        setDoc, 
+        deleteDoc, 
+        onSnapshot, 
+        writeBatch 
+    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const MY_FIREBASE_CONFIG = {
         apiKey: "AIzaSyBO9MxIcql3k1FkavklUMQy_vqwCThOd1M",
@@ -384,11 +392,9 @@
 
     let db = null;
     let auth = null;
-    let isCloudLoaded = false; // 클라우드 초기 로딩 완료 여부
-
     window.customGlossary = [];
 
-    // UI 및 상태 반영
+    // UI 및 전역 상태 갱신
     window.setGlossaryState = function(terms) {
         if (!Array.isArray(terms)) terms = [];
         window.customGlossary = terms;
@@ -397,56 +403,40 @@
         if (typeof window.renderGlossaryList === 'function') window.renderGlossaryList();
     };
 
-    // 클라우드로 데이터 전송 (저장/수정/삭제 공통)
-    async function syncToCloud(updatedList) {
-        if (!db) {
-            alert("DB 연결이 안 되어 있습니다. 콘솔 에러를 확인하세요.");
-            return;
-        }
-        try {
-            // 경로 단순화: 'glossary' 컬렉션의 'shared_data' 문서
-            const docRef = doc(db, 'glossary', 'shared_data');
-            await setDoc(docRef, { items: updatedList, updatedAt: Date.now() });
-        } catch (e) {
-            console.error('Firestore 쓰기 에러:', e);
-            alert(`클라우드 저장 실패! 에러: ${e.message}`);
-        }
-    }
-
     async function initFirebaseSync() {
         try {
             const app = initializeApp(MY_FIREBASE_CONFIG);
             db = getFirestore(app);
             auth = getAuth(app);
 
-            // 1. 익명 로그인 실행 (Firebase Console에서 Anonymous 활성화 필수)
+            // 1. 익명 로그인 실행
             await signInAnonymously(auth);
-            console.log("Firebase Auth 로그인 성공");
 
-            // 2. 실시간 구독 설정
-            const docRef = doc(db, 'glossary', 'shared_data');
-            onSnapshot(docRef, (snapshot) => {
-                if (snapshot.exists()) {
-                    const data = snapshot.data();
-                    const cloudTerms = data.items || [];
-                    console.log("클라우드 데이터 수신 성공:", cloudTerms.length, "개");
-                    window.setGlossaryState(cloudTerms);
-                } else {
-                    console.log("클라우드 문서가 존재하지 않습니다. 첫 데이터 등록이 필요합니다.");
-                }
-                isCloudLoaded = true;
+            // 2. glossary_terms 컬렉션 단위 실시간 구독
+            const termsCollectionRef = collection(db, 'glossary_terms');
+            
+            onSnapshot(termsCollectionRef, (snapshot) => {
+                const fetchedTerms = [];
+                snapshot.forEach((docSnap) => {
+                    fetchedTerms.push(docSnap.data());
+                });
+
+                // 생성 시간 기준 역순 정렬 (최신순)
+                fetchedTerms.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+                console.log(`[Firestore 동기화 완료] 총 ${fetchedTerms.length}개 용어 수신됨`);
+                window.setGlossaryState(fetchedTerms);
             }, (error) => {
-                console.error("Firestore 읽기 구독 에러:", error);
-                alert(`데이터 읽기 실패: ${error.message}\nFirebase Rules 또는 Auth 설정을 확인하세요.`);
+                console.error("Firestore 실시간 구독 에러:", error);
+                alert(`데이터 수신 에러: ${error.message}`);
             });
 
         } catch (err) {
             console.error("Firebase 초기화 에러:", err);
-            alert(`Firebase 초기화 실패: ${err.message}`);
         }
     }
 
-    // 용어 등록 함수
+    // 1. 단일 용어 추가
     window.addGlossaryTerm = async function() {
         const kr = document.getElementById('gloss-kr').value.trim();
         const en = document.getElementById('gloss-en').value.trim();
@@ -456,42 +446,111 @@
         const exactCase = document.getElementById('gloss-exact-case').checked;
 
         if (!kr || (!en && !ja && !zhCn && !zhTw)) {
-            window.showToast('한국어 원문과 최소 1개 이상의 번역 언어를 입력하세요.');
+            window.showToast('한국어 원문과 최소 1개 이상의 번역 언어를 입력해 주세요.');
             return;
         }
 
+        const docId = 'term_' + Date.now();
         const newTerm = {
-            id: 'term_' + Date.now(),
+            id: docId,
             kr, en, ja, zhCn, zhTw,
             exactCase: !!exactCase,
             createdAt: Date.now()
         };
 
-        const updatedList = [newTerm, ...window.customGlossary];
-        await syncToCloud(updatedList);
+        try {
+            // 개별 문서로 저장
+            const docRef = doc(db, 'glossary_terms', docId);
+            await setDoc(docRef, newTerm);
 
-        document.getElementById('gloss-kr').value = '';
-        document.getElementById('gloss-en').value = '';
-        document.getElementById('gloss-ja').value = '';
-        document.getElementById('gloss-zh-cn').value = '';
-        document.getElementById('gloss-zh-tw').value = '';
-        document.getElementById('gloss-exact-case').checked = false;
+            document.getElementById('gloss-kr').value = '';
+            document.getElementById('gloss-en').value = '';
+            document.getElementById('gloss-ja').value = '';
+            document.getElementById('gloss-zh-cn').value = '';
+            document.getElementById('gloss-zh-tw').value = '';
+            document.getElementById('gloss-exact-case').checked = false;
 
-        window.showToast(`[${kr}] 용어가 동기화되었습니다.`);
+            window.showToast(`[${kr}] 용어가 저장되어 클라우드에 공유되었습니다.`);
+        } catch (e) {
+            console.error('단일 데이터 저장 에러:', e);
+            alert(`저장 실패: ${e.message}`);
+        }
     };
 
-    // CSV 일괄 저장
+    // 2. CSV 대량 용어 배치 저장 (WriteBatch 활용)
     window.saveBatchGlossaryTerms = async function(newItems) {
-        const combined = [...newItems, ...window.customGlossary];
-        await syncToCloud(combined);
+        if (!newItems || newItems.length === 0 || !db) return;
+
+        try {
+            // Firestore Batch 분할 처리 (최대 500개 단위)
+            const chunkSize = 400;
+            for (let i = 0; i < newItems.length; i += chunkSize) {
+                const chunk = newItems.slice(i, i + chunkSize);
+                const batch = writeBatch(db);
+
+                chunk.forEach((item) => {
+                    const docId = String(item.id || ('term_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)));
+                    const docRef = doc(db, 'glossary_terms', docId);
+                    batch.set(docRef, { ...item, id: docId });
+                });
+
+                await batch.commit();
+            }
+
+            window.showToast(`${newItems.length}개 용어가 서버로 배치 업로드되었습니다.`);
+        } catch (e) {
+            console.error('CSV 배치 저장 에러:', e);
+            alert(`CSV 업로드 중 오류 발생: ${e.message}`);
+        }
     };
 
-    // 삭제
+    // 3. 단일 용어 삭제
     window.deleteGlossaryTerm = async function(id) {
+        if (!id || !db) return;
+        try {
+            const docRef = doc(db, 'glossary_terms', String(id));
+            await deleteDoc(docRef);
+            window.showToast('지정 용어가 클라우드에서 삭제되었습니다.');
+        } catch (e) {
+            console.error('삭제 에러:', e);
+            alert(`삭제 실패: ${e.message}`);
+        }
+    };
+
+    // 4. 수정사항 저장
+    window.saveEditGlossaryTerm = async function(id) {
         const idStr = String(id);
-        const updatedList = window.customGlossary.filter(item => String(item.id) !== idStr);
-        await syncToCloud(updatedList);
-        window.showToast('삭제되었습니다.');
+        const editKr = (document.getElementById(`edit-kr-${idStr}`)?.value || '').trim();
+        const editEn = (document.getElementById(`edit-en-${idStr}`)?.value || '').trim();
+        const editJa = (document.getElementById(`edit-ja-${idStr}`)?.value || '').trim();
+        const editZhCn = (document.getElementById(`edit-zh-cn-${idStr}`)?.value || '').trim();
+        const editZhTw = (document.getElementById(`edit-zh-tw-${idStr}`)?.value || '').trim();
+        const editExactCase = document.getElementById(`edit-exact-case-${idStr}`)?.checked;
+
+        if (!editKr || (!editEn && !editJa && !editZhCn && !editZhTw)) {
+            window.showToast('한국어 원문과 최소 하나 이상의 번역 언어를 입력해 주세요.');
+            return;
+        }
+
+        try {
+            const docRef = doc(db, 'glossary_terms', idStr);
+            await setDoc(docRef, {
+                id: idStr,
+                kr: editKr,
+                en: editEn,
+                ja: editJa,
+                zhCn: editZhCn,
+                zhTw: editZhTw,
+                exactCase: !!editExactCase,
+                updatedAt: Date.now()
+            }, { merge: true });
+
+            window.editingGlossaryId = null;
+            window.showToast('지정 명칭이 수정되었습니다.');
+        } catch (e) {
+            console.error('수정 저장 에러:', e);
+            alert(`수정 실패: ${e.message}`);
+        }
     };
 
     window.addEventListener('DOMContentLoaded', () => {
